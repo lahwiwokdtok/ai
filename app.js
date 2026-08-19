@@ -53,6 +53,17 @@ function showToast(msg, type='info'){
 function rupiah(n){ return 'Rp' + Number(n||0).toLocaleString('id-ID'); }
 function initials(name){ return (name||'?').slice(0,1).toUpperCase(); }
 
+const VERIFIED_BADGE_SVG = `<span class="verified-badge"><svg viewBox="0 0 24 24" fill="#3ba3ff"><path d="M12 2l2.4 1.7 2.9-.4 1.1 2.7 2.7 1.1-.4 2.9L22 12l-1.7 2.4.4 2.9-2.7 1.1-1.1 2.7-2.9-.4L12 22l-2.4-1.7-2.9.4-1.1-2.7-2.7-1.1.4-2.9L2 12l1.7-2.4-.4-2.9 2.7-1.1 1.1-2.7 2.9.4z"/><path d="M9 12l2 2 4-4" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`;
+
+function displayNameOf(p) {
+  if (!p) return 'User';
+  if (p.is_verified && p.verified_name) return p.verified_name;
+  return p.display_name || p.username || 'User';
+}
+function nameWithBadge(p) {
+  return escHtml(displayNameOf(p)) + (p?.is_verified ? VERIFIED_BADGE_SVG : '');
+}
+
 $('#toggle-pw').onclick = () => {
   const inp = $('#auth-password');
   inp.type = inp.type === 'password' ? 'text' : 'password';
@@ -121,6 +132,7 @@ $('#auth-submit').onclick = async () => {
 $('#logout-btn').onclick = async () => {
   stopHeartbeat();
   if (chatChannel) { supabase.removeChannel(chatChannel); chatChannel = null; }
+  if (dmChannel) { supabase.removeChannel(dmChannel); dmChannel = null; }
   chatMessagesCache = []; chatLoaded = false;
   await supabase.auth.signOut();
   currentUser = null; currentProfile = null;
@@ -145,7 +157,7 @@ async function loadProfile() {
   currentProfile = data;
   lastKnownBalance = data.balance;
   renderBalance(data.balance);
-  $('#welcome-name').textContent = 'Welcome back, ' + (data.display_name || data.username);
+  $('#welcome-name').textContent = 'Welcome back, ' + displayNameOf(data);
   renderProfileHeader();
 }
 
@@ -258,7 +270,7 @@ $('#viewer-close').onclick = closeStatusViewer;
 async function loadVideoFeed() {
   const { data, error } = await supabase
     .from('videos')
-    .select('*, profiles(username, display_name, avatar_url)')
+    .select('*, profiles(id, username, display_name, avatar_url, is_verified, verified_name)')
     .eq('deleted_by_admin', false).eq('deleted_by_user', false)
     .order('created_at', { ascending: false })
     .limit(20);
@@ -274,20 +286,39 @@ async function loadVideoFeed() {
     return;
   }
 
+  // Cek video mana saja yang sudah disukai user ini
+  let likedSet = new Set();
+  const { data: myLikes } = await supabase.from('video_likes').select('video_id').eq('user_id', currentUser.id).in('video_id', data.map(v => v.id));
+  (myLikes || []).forEach(l => likedSet.add(l.video_id));
+
   feed.innerHTML = data.map(v => {
-    const name = v.profiles?.display_name || v.profiles?.username || 'User';
+    const p = v.profiles;
+    const isLiked = likedSet.has(v.id);
     return `
     <div class="video-card">
       <video src="${v.video_url}" controls playsinline preload="metadata" data-video-id="${v.id}"></video>
       <div class="video-meta">
-        <div class="video-user">
-          <div class="avatar-sm">${v.profiles?.avatar_url ? `<img src="${v.profiles.avatar_url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">` : initials(name)}</div>
-          ${name}
+        <div class="video-user name-clickable" data-open-profile="${p?.id || ''}">
+          <div class="avatar-sm">${p?.avatar_url ? `<img src="${escHtml(p.avatar_url)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">` : initials(displayNameOf(p))}</div>
+          ${nameWithBadge(p)}
         </div>
-        ${v.caption ? `<div class="video-caption">${v.caption}</div>` : ''}
+        ${v.caption ? `<div class="video-caption">${escHtml(v.caption)}</div>` : ''}
         <div class="video-stats">
           <svg class="icon" viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
           ${v.view_count} views
+        </div>
+        <div class="video-actions">
+          <button class="vaction ${isLiked ? 'liked' : ''}" data-like-video="${v.id}">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z"/></svg>
+            <span data-like-count="${v.id}">${v.like_count || 0}</span>
+          </button>
+          <button class="vaction clickable-count" data-show-likes="${v.id}" title="Lihat yang suka">
+            <svg class="icon" style="width:14px;height:14px" viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"/><path d="M2 21c0-4 3-7 7-7s7 3 7 7"/></svg>
+          </button>
+          <button class="vaction" data-open-comments="${v.id}">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+            <span data-comment-count="${v.id}">${v.comment_count || 0}</span>
+          </button>
         </div>
       </div>
     </div>`;
@@ -298,6 +329,10 @@ async function loadVideoFeed() {
       supabase.rpc('register_video_view', { p_video_id: vid.dataset.videoId }).catch(console.error);
     }, { once: true });
   });
+  $all('[data-like-video]').forEach(btn => btn.onclick = () => toggleLike(btn.dataset.likeVideo, btn));
+  $all('[data-show-likes]').forEach(btn => btn.onclick = () => openLikesList(btn.dataset.showLikes));
+  $all('[data-open-comments]').forEach(btn => btn.onclick = () => openComments(btn.dataset.openComments));
+  $all('[data-open-profile]').forEach(el => el.onclick = () => { if (el.dataset.openProfile) openUserProfile(el.dataset.openProfile); });
 }
 
 function openSheet(id) { $('#' + id).classList.add('open'); }
@@ -390,7 +425,7 @@ $('#submit-video-upload').onclick = async () => {
 
 function renderProfileHeader() {
   if (!currentProfile) return;
-  $('#profile-display-name').textContent = currentProfile.display_name || currentProfile.username;
+  $('#profile-display-name').innerHTML = nameWithBadge(currentProfile);
   $('#profile-username').textContent = '@' + currentProfile.username;
   $('#profile-avatar').innerHTML = currentProfile.avatar_url
     ? `<img src="${currentProfile.avatar_url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`
@@ -544,7 +579,7 @@ async function loadChatMessages() {
   chatLoaded = true;
   const { data, error } = await supabase
     .from('chat_messages')
-    .select('*, profiles(username, display_name, avatar_url, role)')
+    .select('*, profiles(id, username, display_name, avatar_url, role, is_verified, verified_name)')
     .eq('deleted_by_admin', false)
     .order('created_at', { ascending: true })
     .limit(200);
@@ -572,17 +607,17 @@ function renderChatMessages() {
   const isAdmin = currentProfile?.role === 'admin';
   box.innerHTML = chatMessagesCache.map(m => {
     const isOwn = m.user_id === currentUser.id;
-    const name = m.profiles?.display_name || m.profiles?.username || 'User';
-    const avatar = m.profiles?.avatar_url
-      ? `<img src="${escHtml(m.profiles.avatar_url)}">`
-      : initials(name);
+    const p = m.profiles;
+    const avatar = p?.avatar_url
+      ? `<img src="${escHtml(p.avatar_url)}">`
+      : initials(displayNameOf(p));
     const time = new Date(m.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
     const canDelete = isAdmin || isOwn;
     return `
       <div class="chat-msg ${isOwn ? 'own' : ''}">
-        <div class="chat-msg-avatar">${avatar}</div>
+        <div class="chat-msg-avatar ${!isOwn ? 'name-clickable' : ''}" ${!isOwn ? `data-open-profile="${p?.id || ''}"` : ''}>${avatar}</div>
         <div class="chat-msg-body">
-          ${!isOwn ? `<div class="chat-msg-name">${escHtml(name)}</div>` : ''}
+          ${!isOwn ? `<div class="chat-msg-name name-clickable" data-open-profile="${p?.id || ''}">${nameWithBadge(p)}</div>` : ''}
           <div class="chat-msg-bubble">
             ${m.content ? escHtml(m.content) : ''}
             ${m.image_url ? `<img src="${escHtml(m.image_url)}" />` : ''}
@@ -594,6 +629,7 @@ function renderChatMessages() {
   }).join('');
 
   $all('[data-del-chat]').forEach(el => el.onclick = () => deleteChatMessage(el.dataset.delChat));
+  $all('#chat-messages [data-open-profile]').forEach(el => el.onclick = () => { if (el.dataset.openProfile) openUserProfile(el.dataset.openProfile); });
 }
 
 async function deleteChatMessage(id) {
@@ -619,7 +655,7 @@ function subscribeChatRealtime() {
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages' }, async (payload) => {
       const row = payload.new;
       if (row.deleted_by_admin) return;
-      const { data: profile } = await supabase.from('profiles').select('username, display_name, avatar_url, role').eq('id', row.user_id).single();
+      const { data: profile } = await supabase.from('profiles').select('id, username, display_name, avatar_url, role, is_verified, verified_name').eq('id', row.user_id).single();
       chatMessagesCache.push({ ...row, profiles: profile });
       renderChatMessages();
       scrollChatToBottom();
@@ -701,6 +737,405 @@ async function sendChatMessage() {
   } finally {
     btn.disabled = false;
     updateChatSendState();
+  }
+}
+
+// =====================================================================
+// LIKE VIDEO
+// =====================================================================
+async function toggleLike(videoId, btn) {
+  btn.disabled = true;
+  try {
+    const { data, error } = await supabase.rpc('toggle_video_like', { p_video_id: videoId });
+    if (error) throw error;
+    btn.classList.toggle('liked', data.liked);
+    const countEl = document.querySelector(`[data-like-count="${videoId}"]`);
+    if (countEl) countEl.textContent = data.like_count;
+  } catch (e) {
+    showToast(e.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function openLikesList(videoId) {
+  const box = $('#likes-list');
+  box.innerHTML = `<div class="empty" style="padding:20px 0">Memuat...</div>`;
+  openSheet('likes-list-overlay');
+
+  const { data, error } = await supabase
+    .from('video_likes')
+    .select('user_id, profiles(id, username, display_name, avatar_url, is_verified, verified_name)')
+    .eq('video_id', videoId)
+    .order('created_at', { ascending: false });
+
+  if (error) { box.innerHTML = `<div class="empty">Gagal memuat.</div>`; return; }
+  if (!data.length) { box.innerHTML = `<div class="empty" style="padding:20px 0">Belum ada yang menyukai.</div>`; return; }
+
+  box.innerHTML = data.map(l => {
+    const p = l.profiles;
+    return `
+      <div class="likes-row" data-open-profile="${p?.id || ''}">
+        <div class="avatar-sm">${p?.avatar_url ? `<img src="${escHtml(p.avatar_url)}">` : initials(displayNameOf(p))}</div>
+        <div class="likes-row-name">${nameWithBadge(p)}</div>
+      </div>`;
+  }).join('');
+  box.querySelectorAll('[data-open-profile]').forEach(el => el.onclick = () => {
+    closeSheet('likes-list-overlay');
+    openUserProfile(el.dataset.openProfile);
+  });
+}
+
+// =====================================================================
+// KOMENTAR (dengan balasan berjenjang)
+// =====================================================================
+let currentCommentVideoId = null;
+let replyToCommentId = null;
+let replyToName = null;
+
+async function openComments(videoId) {
+  currentCommentVideoId = videoId;
+  replyToCommentId = null;
+  $('#comment-replying-to').classList.remove('show');
+  $('#comment-input').value = '';
+  updateCommentSendState();
+  openSheet('comments-overlay');
+  await loadComments();
+}
+$('#close-comments').onclick = () => closeSheet('comments-overlay');
+
+async function loadComments() {
+  const box = $('#comments-list');
+  box.innerHTML = `<div class="empty" style="padding:20px 0">Memuat...</div>`;
+
+  const { data, error } = await supabase
+    .from('video_comments')
+    .select('*, profiles(id, username, display_name, avatar_url, is_verified, verified_name)')
+    .eq('video_id', currentCommentVideoId)
+    .eq('deleted_by_user', false).eq('deleted_by_admin', false)
+    .order('created_at', { ascending: true });
+
+  if (error) { box.innerHTML = `<div class="empty">Gagal memuat komentar.</div>`; return; }
+  if (!data.length) { box.innerHTML = `<div class="empty" style="padding:20px 0">Belum ada komentar. Jadilah yang pertama!</div>`; return; }
+
+  const topLevel = data.filter(c => !c.parent_comment_id);
+  const repliesOf = (id) => data.filter(c => c.parent_comment_id === id);
+
+  const renderComment = (c, isReply) => {
+    const p = c.profiles;
+    const isAdmin = currentProfile?.role === 'admin';
+    const canDelete = isAdmin || c.user_id === currentUser.id;
+    const time = new Date(c.created_at).toLocaleString('id-ID', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' });
+    return `
+      <div class="comment-item ${isReply ? 'reply' : ''}">
+        <div class="comment-avatar" data-open-profile="${p?.id || ''}">${p?.avatar_url ? `<img src="${escHtml(p.avatar_url)}">` : initials(displayNameOf(p))}</div>
+        <div class="comment-body">
+          <div class="comment-name" data-open-profile="${p?.id || ''}">${nameWithBadge(p)}</div>
+          <div class="comment-text">${escHtml(c.content)}</div>
+          <div class="comment-meta">
+            <span>${time}</span>
+            <span data-reply-to="${c.id}" data-reply-name="${escHtml(displayNameOf(p))}" style="cursor:pointer">Balas</span>
+            ${canDelete ? `<span data-del-comment="${c.id}" style="color:var(--red); cursor:pointer">Hapus</span>` : ''}
+          </div>
+        </div>
+      </div>`;
+  };
+
+  let html = '';
+  topLevel.forEach(c => {
+    html += renderComment(c, false);
+    repliesOf(c.id).forEach(r => html += renderComment(r, true));
+  });
+  box.innerHTML = html;
+
+  box.querySelectorAll('[data-open-profile]').forEach(el => el.onclick = () => { if (el.dataset.openProfile) { closeSheet('comments-overlay'); openUserProfile(el.dataset.openProfile); } });
+  box.querySelectorAll('[data-reply-to]').forEach(el => el.onclick = () => setReplyTarget(el.dataset.replyTo, el.dataset.replyName));
+  box.querySelectorAll('[data-del-comment]').forEach(el => el.onclick = () => deleteComment(el.dataset.delComment));
+}
+
+function setReplyTarget(commentId, name) {
+  replyToCommentId = commentId;
+  replyToName = name;
+  $('#comment-replying-text').textContent = 'Membalas ' + name;
+  $('#comment-replying-to').classList.add('show');
+  $('#comment-input').focus();
+}
+$('#cancel-reply').onclick = () => {
+  replyToCommentId = null;
+  $('#comment-replying-to').classList.remove('show');
+};
+
+$('#comment-input').addEventListener('input', updateCommentSendState);
+$('#comment-input').addEventListener('keydown', e => { if (e.key === 'Enter') sendComment(); });
+function updateCommentSendState() {
+  $('#comment-send-btn').disabled = $('#comment-input').value.trim().length === 0;
+}
+$('#comment-send-btn').onclick = () => sendComment();
+
+async function sendComment() {
+  const input = $('#comment-input');
+  const text = input.value.trim();
+  if (!text) return;
+  const btn = $('#comment-send-btn');
+  btn.disabled = true;
+  try {
+    const { error } = await supabase.from('video_comments').insert({
+      video_id: currentCommentVideoId,
+      user_id: currentUser.id,
+      parent_comment_id: replyToCommentId,
+      content: text,
+    });
+    if (error) throw error;
+    input.value = '';
+    replyToCommentId = null;
+    $('#comment-replying-to').classList.remove('show');
+    await loadComments();
+    const countEl = document.querySelector(`[data-comment-count="${currentCommentVideoId}"]`);
+    if (countEl) countEl.textContent = Number(countEl.textContent) + 1;
+  } catch (e) {
+    showToast(e.message, 'error');
+  } finally {
+    updateCommentSendState();
+  }
+}
+
+async function deleteComment(id) {
+  const isAdmin = currentProfile?.role === 'admin';
+  let error;
+  if (isAdmin) {
+    ({ error } = await supabase.rpc('admin_delete_comment', { p_id: id }));
+  } else {
+    ({ error } = await supabase.from('video_comments').update({ deleted_by_user: true }).eq('id', id).eq('user_id', currentUser.id));
+  }
+  if (error) { showToast(error.message, 'error'); return; }
+  await loadComments();
+  const countEl = document.querySelector(`[data-comment-count="${currentCommentVideoId}"]`);
+  if (countEl) countEl.textContent = Math.max(0, Number(countEl.textContent) - 1);
+}
+
+// =====================================================================
+// PROFIL PENGGUNA LAIN
+// =====================================================================
+let viewingProfileId = null;
+
+async function openUserProfile(userId) {
+  if (!userId) return;
+  if (userId === currentUser.id) { navigate('profile'); return; }
+  viewingProfileId = userId;
+
+  $('#op-avatar').innerHTML = '';
+  $('#op-name').innerHTML = 'Memuat...';
+  $('#op-username').textContent = '';
+  $('#op-video-grid').innerHTML = '';
+  $('#other-profile-screen').classList.add('open');
+
+  const { data: p, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
+  if (error || !p) { $('#op-name').textContent = 'Pengguna tidak ditemukan'; return; }
+
+  $('#op-avatar').innerHTML = p.avatar_url ? `<img src="${escHtml(p.avatar_url)}">` : initials(displayNameOf(p));
+  $('#op-name').innerHTML = nameWithBadge(p);
+  $('#op-username').textContent = '@' + p.username;
+
+  const { data: videos } = await supabase.from('videos').select('*').eq('user_id', userId).eq('deleted_by_admin', false).eq('deleted_by_user', false).order('created_at', { ascending: false });
+  const totalLikes = (videos || []).reduce((sum, v) => sum + (v.like_count || 0), 0);
+  $('#op-stat-videos').textContent = videos?.length || 0;
+  $('#op-stat-likes').textContent = totalLikes;
+
+  $('#op-video-grid').innerHTML = (videos || []).map(v => `
+    <div class="cell"><video src="${v.video_url}" muted></video><div class="views"><svg class="icon" viewBox="0 0 24 24"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z"/></svg>${v.like_count || 0}</div></div>
+  `).join('') || `<div class="empty" style="grid-column:1/-1">Belum ada video.</div>`;
+}
+$('#op-back-btn').onclick = () => $('#other-profile-screen').classList.remove('open');
+$('#op-chat-btn').onclick = () => { if (viewingProfileId) openDmChat(viewingProfileId); };
+
+// =====================================================================
+// DM (CHAT PRIBADI)
+// =====================================================================
+let dmConversationId = null;
+let dmOtherUser = null;
+let dmChannel = null;
+let dmThreadsCache = [];
+
+$('#inbox-btn').onclick = () => openDmInbox();
+
+async function openDmInbox() {
+  const box = $('#dm-thread-list');
+  box.innerHTML = `<div class="empty" style="padding:20px 0">Memuat...</div>`;
+  openSheet('dm-inbox-overlay');
+
+  const { data, error } = await supabase
+    .from('dm_conversations')
+    .select('*, a:user_a(id, username, display_name, avatar_url, is_verified, verified_name), b:user_b(id, username, display_name, avatar_url, is_verified, verified_name)')
+    .or(`user_a.eq.${currentUser.id},user_b.eq.${currentUser.id}`)
+    .order('last_message_at', { ascending: false });
+
+  if (error) { box.innerHTML = `<div class="empty">Gagal memuat pesan.</div>`; return; }
+  dmThreadsCache = data || [];
+  if (!dmThreadsCache.length) { box.innerHTML = `<div class="empty" style="padding:20px 0">Belum ada pesan.</div>`; return; }
+
+  const rows = await Promise.all(dmThreadsCache.map(async (t) => {
+    const other = t.user_a === currentUser.id ? t.b : t.a;
+    const { data: lastMsg } = await supabase.from('dm_messages').select('content, image_url, sender_id, read_at').eq('conversation_id', t.id).order('created_at', { ascending: false }).limit(1).maybeSingle();
+    const unread = lastMsg && lastMsg.sender_id !== currentUser.id && !lastMsg.read_at;
+    const preview = lastMsg ? (lastMsg.content || (lastMsg.image_url ? '📷 Gambar' : '')) : '';
+    return { t, other, preview, unread };
+  }));
+
+  updateInboxDot(rows.some(r => r.unread));
+
+  box.innerHTML = rows.map(({ t, other, preview, unread }) => `
+    <div class="dm-thread-row" data-open-dm="${other?.id || ''}">
+      <div class="avatar-sm">${other?.avatar_url ? `<img src="${escHtml(other.avatar_url)}">` : initials(displayNameOf(other))}</div>
+      <div class="dm-thread-mid">
+        <div class="dm-thread-name">${nameWithBadge(other)}</div>
+        <div class="dm-thread-preview">${escHtml(preview)}</div>
+      </div>
+      ${unread ? '<div class="dm-unread-dot"></div>' : ''}
+    </div>
+  `).join('');
+
+  box.querySelectorAll('[data-open-dm]').forEach(el => el.onclick = () => { closeSheet('dm-inbox-overlay'); openDmChat(el.dataset.openDm); });
+}
+
+function updateInboxDot(show) {
+  $('#inbox-dot').classList.toggle('show', !!show);
+}
+
+async function openDmChat(otherUserId) {
+  if (otherUserId === currentUser.id) return;
+  const { data: convId, error } = await supabase.rpc('get_or_create_dm', { p_other_user_id: otherUserId });
+  if (error) { showToast(error.message, 'error'); return; }
+  dmConversationId = convId;
+
+  const { data: p } = await supabase.from('profiles').select('*').eq('id', otherUserId).single();
+  dmOtherUser = p;
+  $('#dm-chat-avatar').innerHTML = p?.avatar_url ? `<img src="${escHtml(p.avatar_url)}" style="width:100%;height:100%;object-fit:cover">` : initials(displayNameOf(p));
+  $('#dm-chat-name').innerHTML = nameWithBadge(p);
+
+  $('#other-profile-screen').classList.remove('open');
+  $('#dm-chat-overlay').classList.add('open');
+
+  await loadDmMessages();
+  subscribeDmRealtime();
+  markDmRead();
+}
+$('#dm-back-btn').onclick = () => {
+  $('#dm-chat-overlay').classList.remove('open');
+  if (dmChannel) { supabase.removeChannel(dmChannel); dmChannel = null; }
+};
+
+async function loadDmMessages() {
+  const box = $('#dm-chat-messages');
+  box.innerHTML = `<div class="chat-empty">Memuat...</div>`;
+  const { data, error } = await supabase
+    .from('dm_messages')
+    .select('*')
+    .eq('conversation_id', dmConversationId)
+    .eq('deleted_by_sender', false)
+    .order('created_at', { ascending: true })
+    .limit(300);
+  if (error) { box.innerHTML = `<div class="chat-empty">Gagal memuat: ${escHtml(error.message)}</div>`; return; }
+  renderDmMessages(data || []);
+}
+
+function renderDmMessages(messages) {
+  const box = $('#dm-chat-messages');
+  if (!messages.length) {
+    box.innerHTML = `<div class="chat-empty">Belum ada pesan. Mulai obrolan!</div>`;
+    return;
+  }
+  box.innerHTML = messages.map(m => {
+    const isOwn = m.sender_id === currentUser.id;
+    const time = new Date(m.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+    return `
+      <div class="chat-msg ${isOwn ? 'own' : ''}">
+        <div class="chat-msg-avatar">${isOwn ? initials(displayNameOf(currentProfile)) : (dmOtherUser?.avatar_url ? `<img src="${escHtml(dmOtherUser.avatar_url)}">` : initials(displayNameOf(dmOtherUser)))}</div>
+        <div class="chat-msg-body">
+          <div class="chat-msg-bubble">
+            ${m.content ? escHtml(m.content) : ''}
+            ${m.image_url ? `<img src="${escHtml(m.image_url)}" />` : ''}
+          </div>
+          <div class="chat-msg-time">${time}</div>
+        </div>
+      </div>`;
+  }).join('');
+  requestAnimationFrame(() => { box.scrollTop = box.scrollHeight; });
+}
+
+function subscribeDmRealtime() {
+  if (dmChannel) { supabase.removeChannel(dmChannel); dmChannel = null; }
+  dmChannel = supabase
+    .channel('dm_' + dmConversationId)
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'dm_messages', filter: `conversation_id=eq.${dmConversationId}` }, () => {
+      loadDmMessages();
+      if (document.querySelector('#dm-chat-overlay.open')) markDmRead();
+    })
+    .subscribe();
+}
+
+async function markDmRead() {
+  await supabase.from('dm_messages').update({ read_at: new Date().toISOString() })
+    .eq('conversation_id', dmConversationId).neq('sender_id', currentUser.id).is('read_at', null);
+  updateInboxDot(false);
+}
+
+let dmImageFileObj = null;
+$('#dm-text-input').addEventListener('input', (e) => {
+  updateDmSendState();
+  e.target.style.height = 'auto';
+  e.target.style.height = Math.min(e.target.scrollHeight, 90) + 'px';
+});
+$('#dm-text-input').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendDmMessage(); } });
+$('#dm-attach-btn').onclick = () => $('#dm-image-file').click();
+$('#dm-image-file').onchange = (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  dmImageFileObj = f;
+  $('#dm-preview-img').src = URL.createObjectURL(f);
+  $('#dm-preview-name').textContent = f.name;
+  $('#dm-image-preview').classList.add('show');
+  updateDmSendState();
+};
+$('#dm-remove-preview').onclick = () => {
+  dmImageFileObj = null;
+  $('#dm-image-file').value = '';
+  $('#dm-image-preview').classList.remove('show');
+  updateDmSendState();
+};
+function updateDmSendState() {
+  const hasText = $('#dm-text-input').value.trim().length > 0;
+  $('#dm-send-btn').disabled = !(hasText || dmImageFileObj);
+}
+$('#dm-send-btn').onclick = () => sendDmMessage();
+
+async function sendDmMessage() {
+  const textEl = $('#dm-text-input');
+  const text = textEl.value.trim();
+  if (!text && !dmImageFileObj) return;
+  const btn = $('#dm-send-btn');
+  btn.disabled = true;
+  try {
+    let imageUrl = null;
+    if (dmImageFileObj) {
+      const path = `dm/${currentUser.id}/${Date.now()}-${dmImageFileObj.name}`;
+      const { error: upErr } = await supabase.storage.from('media').upload(path, dmImageFileObj);
+      if (upErr) throw upErr;
+      const { data: pub } = supabase.storage.from('media').getPublicUrl(path);
+      imageUrl = pub.publicUrl;
+    }
+    const { error } = await supabase.from('dm_messages').insert({
+      conversation_id: dmConversationId, sender_id: currentUser.id,
+      content: text || null, image_url: imageUrl,
+    });
+    if (error) throw error;
+    textEl.value = ''; textEl.style.height = 'auto';
+    dmImageFileObj = null; $('#dm-image-file').value = '';
+    $('#dm-image-preview').classList.remove('show');
+    await loadDmMessages();
+  } catch (e) {
+    showToast(e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    updateDmSendState();
   }
 }
 
