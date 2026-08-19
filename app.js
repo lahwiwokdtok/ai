@@ -120,6 +120,8 @@ $('#auth-submit').onclick = async () => {
 
 $('#logout-btn').onclick = async () => {
   stopHeartbeat();
+  if (chatChannel) { supabase.removeChannel(chatChannel); chatChannel = null; }
+  chatMessagesCache = []; chatLoaded = false;
   await supabase.auth.signOut();
   currentUser = null; currentProfile = null;
   showScreen('screen-auth');
@@ -154,13 +156,14 @@ function renderBalance(balance) {
 }
 
 function navigate(page) {
-  $all('.page-view').forEach(p => p.style.display = p.dataset.page === page ? 'block' : 'none');
+  $all('.page-view').forEach(p => p.style.display = p.dataset.page === page ? (p.dataset.page === 'chat' ? 'flex' : 'block') : 'none');
   $all('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.nav === page));
-  const label = { home:'Home', status:'Status', video:'Video', wallet:'Wallet', profile:'Profil' }[page];
+  const label = { home:'Home', chat:'Chat', status:'Status', video:'Video', wallet:'Wallet', profile:'Profil' }[page];
   $('#page-title').innerHTML = '<span></span>' + label;
   if (page === 'profile') renderProfileHeader();
   if (page === 'wallet') loadWithdrawHistory();
-  $('#fab-upload').style.display = (page === 'wallet') ? 'none' : 'flex';
+  if (page === 'chat') { loadChatMessages(); subscribeChatRealtime(); scrollChatToBottom(); }
+  $('#fab-upload').style.display = (page === 'wallet' || page === 'chat') ? 'none' : 'flex';
 }
 $all('[data-nav]').forEach(el => el.addEventListener('click', () => navigate(el.dataset.nav)));
 
@@ -517,6 +520,213 @@ async function loadWithdrawHistory() {
     </div>
   `).join('');
 }
+
+// =====================================================================
+// CHAT GLOBAL
+// =====================================================================
+const ADMIN_ACCESS_CODE = 'admin1234';
+let chatMessagesCache = [];
+let chatChannel = null;
+let chatImageFileObj = null;
+let chatLoaded = false;
+
+function escHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+}
+
+function scrollChatToBottom() {
+  const el = $('#chat-messages');
+  if (el) requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
+}
+
+async function loadChatMessages() {
+  if (chatLoaded) return;
+  chatLoaded = true;
+  const { data, error } = await supabase
+    .from('chat_messages')
+    .select('*, profiles(username, display_name, avatar_url, role)')
+    .eq('deleted_by_admin', false)
+    .order('created_at', { ascending: true })
+    .limit(200);
+
+  if (error) {
+    $('#chat-messages').innerHTML = `<div class="chat-empty">Gagal memuat chat: ${escHtml(error.message)}</div>`;
+    chatLoaded = false;
+    return;
+  }
+  chatMessagesCache = data || [];
+  renderChatMessages();
+  scrollChatToBottom();
+}
+
+function renderChatMessages() {
+  const box = $('#chat-messages');
+  if (!chatMessagesCache.length) {
+    box.innerHTML = `
+      <div class="chat-empty">
+        <svg class="icon" style="width:26px;height:26px" viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+        Belum ada pesan. Jadilah yang pertama menyapa!
+      </div>`;
+    return;
+  }
+  const isAdmin = currentProfile?.role === 'admin';
+  box.innerHTML = chatMessagesCache.map(m => {
+    const isOwn = m.user_id === currentUser.id;
+    const name = m.profiles?.display_name || m.profiles?.username || 'User';
+    const avatar = m.profiles?.avatar_url
+      ? `<img src="${escHtml(m.profiles.avatar_url)}">`
+      : initials(name);
+    const time = new Date(m.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+    const canDelete = isAdmin || isOwn;
+    return `
+      <div class="chat-msg ${isOwn ? 'own' : ''}">
+        <div class="chat-msg-avatar">${avatar}</div>
+        <div class="chat-msg-body">
+          ${!isOwn ? `<div class="chat-msg-name">${escHtml(name)}</div>` : ''}
+          <div class="chat-msg-bubble">
+            ${m.content ? escHtml(m.content) : ''}
+            ${m.image_url ? `<img src="${escHtml(m.image_url)}" />` : ''}
+          </div>
+          <div class="chat-msg-time">${time}</div>
+        </div>
+        ${canDelete ? `<div class="chat-msg-del" data-del-chat="${m.id}"><svg class="icon" style="width:13px;height:13px" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6"/></svg></div>` : ''}
+      </div>`;
+  }).join('');
+
+  $all('[data-del-chat]').forEach(el => el.onclick = () => deleteChatMessage(el.dataset.delChat));
+}
+
+async function deleteChatMessage(id) {
+  const isAdmin = currentProfile?.role === 'admin';
+  const msg = chatMessagesCache.find(m => m.id === id);
+  const isOwn = msg && msg.user_id === currentUser.id;
+
+  let error;
+  if (isAdmin && !isOwn) {
+    ({ error } = await supabase.rpc('admin_delete_chat_message', { p_id: id }));
+  } else {
+    ({ error } = await supabase.from('chat_messages').update({ deleted_by_admin: true }).eq('id', id).eq('user_id', currentUser.id));
+  }
+  if (error) { showToast(error.message, 'error'); return; }
+  chatMessagesCache = chatMessagesCache.filter(m => m.id !== id);
+  renderChatMessages();
+}
+
+function subscribeChatRealtime() {
+  if (chatChannel) return;
+  chatChannel = supabase
+    .channel('chat_messages_global')
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages' }, async (payload) => {
+      const row = payload.new;
+      if (row.deleted_by_admin) return;
+      const { data: profile } = await supabase.from('profiles').select('username, display_name, avatar_url, role').eq('id', row.user_id).single();
+      chatMessagesCache.push({ ...row, profiles: profile });
+      renderChatMessages();
+      scrollChatToBottom();
+    })
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'chat_messages' }, (payload) => {
+      const row = payload.new;
+      if (row.deleted_by_admin) {
+        chatMessagesCache = chatMessagesCache.filter(m => m.id !== row.id);
+        renderChatMessages();
+      }
+    })
+    .subscribe();
+}
+
+$('#chat-text-input').addEventListener('input', (e) => {
+  updateChatSendState();
+  e.target.style.height = 'auto';
+  e.target.style.height = Math.min(e.target.scrollHeight, 90) + 'px';
+});
+$('#chat-text-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChatMessage(); }
+});
+
+$('#chat-attach-btn').onclick = () => $('#chat-image-file').click();
+$('#chat-image-file').onchange = (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  chatImageFileObj = f;
+  $('#chat-preview-img').src = URL.createObjectURL(f);
+  $('#chat-preview-name').textContent = f.name;
+  $('#chat-image-preview').classList.add('show');
+  updateChatSendState();
+};
+$('#chat-remove-preview').onclick = () => {
+  chatImageFileObj = null;
+  $('#chat-image-file').value = '';
+  $('#chat-image-preview').classList.remove('show');
+  updateChatSendState();
+};
+
+function updateChatSendState() {
+  const hasText = $('#chat-text-input').value.trim().length > 0;
+  $('#chat-send-btn').disabled = !(hasText || chatImageFileObj);
+}
+
+$('#chat-send-btn').onclick = () => sendChatMessage();
+
+async function sendChatMessage() {
+  const textEl = $('#chat-text-input');
+  const text = textEl.value.trim();
+  if (!text && !chatImageFileObj) return;
+
+  const btn = $('#chat-send-btn');
+  btn.disabled = true;
+
+  try {
+    let imageUrl = null;
+    if (chatImageFileObj) {
+      const path = `chat/${currentUser.id}/${Date.now()}-${chatImageFileObj.name}`;
+      const { error: upErr } = await supabase.storage.from('media').upload(path, chatImageFileObj);
+      if (upErr) throw upErr;
+      const { data: pub } = supabase.storage.from('media').getPublicUrl(path);
+      imageUrl = pub.publicUrl;
+    }
+
+    const { error } = await supabase.from('chat_messages').insert({
+      user_id: currentUser.id,
+      content: text || null,
+      image_url: imageUrl,
+    });
+    if (error) throw error;
+
+    textEl.value = ''; textEl.style.height = 'auto';
+    chatImageFileObj = null;
+    $('#chat-image-file').value = '';
+    $('#chat-image-preview').classList.remove('show');
+    updateChatSendState();
+  } catch (e) {
+    showToast(e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    updateChatSendState();
+  }
+}
+
+// =====================================================================
+// AKSES ADMIN (lewat ikon profil di topbar)
+// =====================================================================
+$('#admin-access-btn').onclick = () => {
+  $('#admin-access-code').value = '';
+  $('#admin-access-error').style.display = 'none';
+  openSheet('admin-access-overlay');
+  setTimeout(() => $('#admin-access-code').focus(), 100);
+};
+$('#cancel-admin-access').onclick = () => closeSheet('admin-access-overlay');
+$('#admin-access-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#submit-admin-access').click(); });
+$('#submit-admin-access').onclick = () => {
+  const code = $('#admin-access-code').value.trim();
+  const errEl = $('#admin-access-error');
+  if (code !== ADMIN_ACCESS_CODE) {
+    errEl.textContent = 'Kode akses salah.';
+    errEl.style.display = 'block';
+    return;
+  }
+  // Kode cuma membuka pintu masuk ke halaman admin — otorisasi asli tetap
+  // dicek di server (role admin) begitu login di admin.html.
+  window.location.href = './admin.html';
+};
 
 (async function init() {
   try {
