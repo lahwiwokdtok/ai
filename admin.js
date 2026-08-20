@@ -150,6 +150,15 @@ async function loadDashboard() {
     <div class="a-stat-card"><div class="a-stat-label">Total Video</div><div class="a-stat-value">${data.total_videos}</div></div>
     <div class="a-stat-card"><div class="a-stat-label">Status Aktif</div><div class="a-stat-value">${data.total_statuses}</div></div>
   `;
+  if (!$('#broadcast-notif-btn')) {
+    const btn = document.createElement('button');
+    btn.id = 'broadcast-notif-btn';
+    btn.className = 'a-submit';
+    btn.style.marginTop = '16px';
+    btn.innerHTML = '📢 Kirim Notifikasi ke Semua Pengguna';
+    btn.onclick = () => openNotifyModal(null);
+    grid.parentElement.appendChild(btn);
+  }
 
   const badge = $('#badge-withdrawals');
   if (data.pending_withdrawals > 0) {
@@ -272,13 +281,20 @@ function renderUsers() {
         <div class="a-row-title">
           @${esc(u.username)}
           ${u.role === 'admin' ? '<span class="a-pill admin">Admin</span>' : ''}
+          ${u.is_verified ? '<span class="a-pill" style="background:#123a5a;color:#3ba3ff;">✓ ' + esc(u.verified_name || 'Verified') + '</span>' : ''}
           ${u.banned ? '<span class="a-pill banned">Diblokir</span>' : ''}
         </div>
         <div class="a-row-sub">${rupiah(u.balance)} · bergabung ${new Date(u.created_at).toLocaleDateString('id-ID')}</div>
       </div>
       <div class="a-row-right">
+        <button class="a-icon-btn ${u.is_verified ? '' : ''}" data-edit-verify="${u.id}" title="Centang biru" style="${u.is_verified ? 'color:#3ba3ff;border-color:#123a5a;' : ''}">
+          <svg class="icon" style="width:15px;height:15px" viewBox="0 0 24 24"><path d="M12 2l2.4 1.7 2.9-.4 1.1 2.7 2.7 1.1-.4 2.9L22 12l-1.7 2.4.4 2.9-2.7 1.1-1.1 2.7-2.9-.4L12 22l-2.4-1.7-2.9.4-1.1-2.7-2.7-1.1.4-2.9L2 12l1.7-2.4-.4-2.9 2.7-1.1 1.1-2.7 2.9.4z"/><path d="M9 12l2 2 4-4"/></svg>
+        </button>
         <button class="a-icon-btn" data-edit-balance="${u.id}" title="Ubah saldo">
           <svg class="icon" style="width:15px;height:15px" viewBox="0 0 24 24"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        </button>
+        <button class="a-icon-btn" data-send-notif="${u.id}" title="Kirim notifikasi">
+          <svg class="icon" style="width:15px;height:15px" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
         </button>
         <button class="a-icon-btn ${u.banned ? '' : 'danger'}" data-toggle-ban="${u.id}" data-banned="${u.banned}" title="${u.banned ? 'Buka blokir' : 'Blokir'}">
           <svg class="icon" style="width:15px;height:15px" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M4.9 4.9l14.2 14.2"/></svg>
@@ -290,6 +306,8 @@ function renderUsers() {
     </div>
   `).join('');
 
+  $all('[data-edit-verify]').forEach(btn => btn.onclick = () => openVerifyModal(btn.dataset.editVerify));
+  $all('[data-send-notif]').forEach(btn => btn.onclick = () => openNotifyModal(btn.dataset.sendNotif));
   $all('[data-edit-balance]').forEach(btn => btn.onclick = () => openBalanceModal(btn.dataset.editBalance));
   $all('[data-toggle-ban]').forEach(btn => btn.onclick = () => toggleBan(btn.dataset.toggleBan, btn.dataset.banned === 'true'));
   $all('[data-delete-user]').forEach(btn => btn.onclick = () => confirmDeleteUser(btn.dataset.deleteUser));
@@ -312,6 +330,50 @@ $('#balance-confirm').onclick = async () => {
   showToast('Saldo diperbarui');
   loadUsers();
   loadDashboard();
+};
+
+let verifyTargetId = null;
+function openVerifyModal(userId) {
+  verifyTargetId = userId;
+  const u = usersCache.find(x => x.id === userId);
+  $('#verify-modal-title').textContent = 'Centang biru — @' + (u?.username || '');
+  $('#verify-label-input').value = u?.verified_name || u?.display_name || u?.username || '';
+  $('#modal-verify').classList.add('open');
+}
+$('#verify-cancel').onclick = () => $('#modal-verify').classList.remove('open');
+$('#verify-remove').onclick = async () => {
+  const { error } = await supabase.rpc('admin_set_verified', { p_user_id: verifyTargetId, p_verified: false, p_label: null });
+  if (error) { showToast(error.message, 'error'); return; }
+  $('#modal-verify').classList.remove('open');
+  showToast('Centang biru dicabut');
+  loadUsers();
+};
+$('#verify-confirm').onclick = async () => {
+  const label = $('#verify-label-input').value.trim();
+  if (!label) { showToast('Label tidak boleh kosong', 'error'); return; }
+  const { error } = await supabase.rpc('admin_set_verified', { p_user_id: verifyTargetId, p_verified: true, p_label: label });
+  if (error) { showToast(error.message, 'error'); return; }
+  $('#modal-verify').classList.remove('open');
+  showToast('Centang biru diberikan');
+  loadUsers();
+};
+
+let notifyTargetId = null; // null = broadcast ke semua
+function openNotifyModal(userId) {
+  notifyTargetId = userId;
+  const u = userId ? usersCache.find(x => x.id === userId) : null;
+  $('#notify-modal-title').textContent = userId ? 'Kirim notifikasi — @' + (u?.username || '') : 'Kirim notifikasi ke SEMUA pengguna';
+  $('#notify-message-input').value = '';
+  $('#modal-notify').classList.add('open');
+}
+$('#notify-cancel').onclick = () => $('#modal-notify').classList.remove('open');
+$('#notify-confirm').onclick = async () => {
+  const msg = $('#notify-message-input').value.trim();
+  if (!msg) { showToast('Pesan tidak boleh kosong', 'error'); return; }
+  const { error } = await supabase.rpc('admin_send_notification', { p_user_id: notifyTargetId, p_message: msg });
+  if (error) { showToast(error.message, 'error'); return; }
+  $('#modal-notify').classList.remove('open');
+  showToast(notifyTargetId ? 'Notifikasi terkirim' : 'Notifikasi disiarkan ke semua pengguna');
 };
 
 async function toggleBan(userId, currentlyBanned) {
@@ -373,12 +435,17 @@ async function loadContent() {
       <div class="a-media-cell">
         <video src="${esc(v.video_url)}" muted></video>
         <div class="a-media-user">@${esc(v.profiles?.username || '?')}</div>
+        ${v.is_promoted ? '<div style="position:absolute;top:6px;left:6px;background:#f5b942;color:#1a1200;font-size:9px;font-weight:800;padding:2px 6px;border-radius:6px;">PROMOSI</div>' : ''}
+        <button class="a-media-del" data-toggle-promote="${v.id}" data-promoted="${v.is_promoted}" title="${v.is_promoted ? 'Batalkan promosi' : 'Promosikan'}" style="right:38px; ${v.is_promoted ? 'color:#f5b942;border-color:#4a3a0e;' : ''}">
+          <svg class="icon" style="width:14px;height:14px" viewBox="0 0 24 24"><path d="M13 2L3 14h7v8l10-12h-7z"/></svg>
+        </button>
         <button class="a-media-del" data-del-video="${v.id}" title="Hapus">
           <svg class="icon" style="width:14px;height:14px" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6"/></svg>
         </button>
       </div>
     `).join('');
     $all('[data-del-video]').forEach(btn => btn.onclick = () => confirmDeleteContent('video', btn.dataset.delVideo));
+    $all('[data-toggle-promote]').forEach(btn => btn.onclick = () => togglePromote(btn.dataset.togglePromote, btn.dataset.promoted === 'true'));
   } else {
     const { data, error } = await supabase.from('statuses').select('*, profiles(username)').eq('deleted_by_admin', false).order('created_at', { ascending: false }).limit(60);
     if (error) { grid.innerHTML = `<div class="a-empty">Gagal memuat: ${esc(error.message)}</div>`; return; }
@@ -409,6 +476,13 @@ function confirmDeleteContent(kind, id) {
       loadDashboard();
     }
   );
+}
+
+async function togglePromote(videoId, currentlyPromoted) {
+  const { error } = await supabase.rpc('admin_set_promoted', { p_video_id: videoId, p_promoted: !currentlyPromoted });
+  if (error) { showToast(error.message, 'error'); return; }
+  showToast(currentlyPromoted ? 'Promosi dibatalkan' : 'Video dijadikan konten promosi');
+  loadContent();
 }
 
 // ---------------------------------------------------------------------

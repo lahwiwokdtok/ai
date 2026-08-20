@@ -65,9 +65,16 @@
           <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
           <span id="topbar-balance">Rp0</span>
         </div>
+        <button class="admin-access-btn inbox-btn" id="notif-btn" title="Notifikasi">
+          <svg class="icon" style="width:17px;height:17px" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+          <span class="inbox-dot" id="notif-dot"></span>
+        </button>
         <button class="admin-access-btn inbox-btn" id="inbox-btn" title="Pesan">
           <svg class="icon" style="width:17px;height:17px" viewBox="0 0 24 24"><path d="M4 4h16v14H5.17L4 19.17z"/></svg>
           <span class="inbox-dot" id="inbox-dot"></span>
+        </button>
+        <button class="admin-access-btn" id="settings-btn" title="Pengaturan">
+          <svg class="icon" style="width:17px;height:17px" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         </button>
         <button class="admin-access-btn" id="admin-access-btn" title="Admin">
           <svg class="icon" style="width:17px;height:17px" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
@@ -174,7 +181,7 @@
       <div class="page-inner page-view" data-page="profile" style="display:none">
         <div class="profile-header">
           <div class="profile-avatar-wrap">
-            <div class="profile-avatar" id="profile-avatar">
+            <div class="avatar-clickable" id="profile-avatar" style="width:76px;height:76px;border-radius:50%;background:var(--card-2);display:flex;align-items:center;justify-content:center;overflow:hidden;">
               <svg class="icon" style="width:32px;height:32px" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
             </div>
             <div class="avatar-edit-btn" id="edit-avatar-btn">
@@ -183,9 +190,12 @@
           </div>
           <div class="profile-name" id="profile-display-name">—</div>
           <div class="profile-username" id="profile-username">@—</div>
+          <div class="op-bio" id="profile-bio" style="display:none;"></div>
           <div class="profile-stats">
             <div class="profile-stat"><b id="stat-videos">0</b><span>Video</span></div>
             <div class="profile-stat"><b id="stat-status">0</b><span>Status</span></div>
+            <div class="profile-stat clickable" id="stat-followers-btn"><b id="stat-followers">0</b><span>Pengikut</span></div>
+            <div class="profile-stat clickable" id="stat-following-btn"><b id="stat-following">0</b><span>Mengikuti</span></div>
             <div class="profile-stat"><b id="stat-balance">Rp0</b><span>Saldo</span></div>
           </div>
           <div class="profile-actions">
@@ -216,9 +226,10 @@
         <svg class="icon" viewBox="0 0 24 24"><path d="M3 12l9-9 9 9M5 10v10h14V10"/></svg>
         <span>Home</span>
       </button>
-      <button class="nav-item" data-nav="chat">
+      <button class="nav-item" data-nav="chat" style="position:relative;">
         <svg class="icon" viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
         <span>Chat</span>
+        <span class="inbox-dot" id="chat-nav-dot" style="top:2px; right:22px;"></span>
       </button>
       <button class="nav-item" data-nav="status">
         <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg>
@@ -311,6 +322,8 @@
     <h2><svg class="icon" viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>Edit Profil</h2>
     <label class="f">Nama Tampilan</label>
     <input class="txt-input" id="edit-display-name" placeholder="Nama tampilan" />
+    <label class="f">Bio</label>
+    <textarea id="edit-bio" placeholder="Ceritakan sedikit tentang kamu..." maxlength="160"></textarea>
     <div class="sheet-actions">
       <button class="btn btn-secondary" id="cancel-edit-profile">Batal</button>
       <button class="btn btn-primary" id="save-edit-profile">Simpan</button>
@@ -350,15 +363,25 @@
 <div id="status-viewer">
   <div class="viewer-progress" id="viewer-progress"></div>
   <div class="viewer-top">
-    <div class="viewer-user">
+    <div class="viewer-user name-clickable" id="viewer-user-info">
       <div class="avatar-sm" id="viewer-avatar"></div>
       <span id="viewer-username">—</span>
+    </div>
+    <div class="content-menu-wrap" id="viewer-menu-wrap" style="display:none; position:relative;">
+      <svg class="icon" id="viewer-menu-btn" style="cursor:pointer" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
+      <div class="content-menu-dropdown" id="viewer-menu-dropdown" style="top:26px; right:0;">
+        <button class="content-menu-item" id="viewer-delete-status">
+          <svg class="icon" style="width:14px;height:14px" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6"/></svg>
+          Hapus Status
+        </button>
+      </div>
     </div>
     <svg class="icon viewer-close" id="viewer-close" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
   </div>
   <div class="viewer-media" id="viewer-media"></div>
   <div class="viewer-caption" id="viewer-caption"></div>
 </div>
+
 
 <div class="toast" id="toast"></div>
 
@@ -397,19 +420,101 @@
     <span style="font-weight:700; font-size:15px;">Profil</span>
   </div>
   <div class="op-body">
-    <div class="op-avatar" id="op-avatar"></div>
+    <div class="op-avatar avatar-clickable" id="op-avatar"></div>
     <div class="op-name" id="op-name"></div>
     <div class="op-username" id="op-username"></div>
+    <div class="op-bio" id="op-bio" style="display:none;"></div>
     <div class="op-stats">
       <div class="op-stat"><b id="op-stat-videos">0</b><span>Video</span></div>
       <div class="op-stat"><b id="op-stat-likes">0</b><span>Suka</span></div>
+      <div class="op-stat clickable" id="op-stat-followers-btn"><b id="op-stat-followers">0</b><span>Pengikut</span></div>
+      <div class="op-stat clickable" id="op-stat-following-btn"><b id="op-stat-following">0</b><span>Mengikuti</span></div>
     </div>
-    <button class="op-chat-btn" id="op-chat-btn">
-      <svg class="icon" style="width:16px;height:16px" viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
-      Kirim Pesan
-    </button>
+    <div class="op-follow-row">
+      <button class="op-follow-btn" id="op-follow-btn">
+        <svg class="icon" style="width:15px;height:15px" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M20 8v6M23 11h-6"/></svg>
+        Ikuti
+      </button>
+      <button class="op-chat-btn" id="op-chat-btn">
+        <svg class="icon" style="width:16px;height:16px" viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+        Kirim Pesan
+      </button>
+    </div>
     <div class="media-grid" id="op-video-grid"></div>
   </div>
+</div>
+
+<!-- ===================== FOLLOWERS/FOLLOWING LIST ===================== -->
+<div class="overlay" id="follow-list-overlay">
+  <div class="sheet">
+    <h2 id="follow-list-title"><svg class="icon" viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"/><path d="M2 21c0-4 3-7 7-7s7 3 7 7"/></svg>Pengikut</h2>
+    <div class="likes-list" id="follow-list"></div>
+  </div>
+</div>
+
+<!-- ===================== PENGATURAN ===================== -->
+<div class="overlay" id="settings-overlay">
+  <div class="sheet">
+    <h2><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Pengaturan</h2>
+
+    <div class="settings-section-title">Tema Tampilan</div>
+    <div class="theme-options">
+      <div class="theme-opt" id="theme-dark-opt" data-theme-choice="dark">
+        <div class="theme-opt-preview dark"></div>
+        <span>Gelap</span>
+      </div>
+      <div class="theme-opt" id="theme-light-opt" data-theme-choice="light">
+        <div class="theme-opt-preview light"></div>
+        <span>Terang</span>
+      </div>
+    </div>
+
+    <div class="settings-section-title">Notifikasi</div>
+    <div class="settings-row">
+      <div class="settings-row-label">
+        <svg class="icon" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+        Notifikasi Suara/Toast
+      </div>
+      <div class="toggle-switch on" id="toggle-notif-sound"><i></i></div>
+    </div>
+
+    <div class="settings-section-title">Akun</div>
+    <div class="settings-row" id="settings-logout-row" style="cursor:pointer">
+      <div class="settings-row-label" style="color:var(--red)">
+        <svg class="icon" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+        Keluar
+      </div>
+    </div>
+
+    <div class="settings-app-info">XAYA AI &middot; v1.0</div>
+
+    <div class="sheet-actions">
+      <button class="btn btn-secondary" id="close-settings">Tutup</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== NOTIFIKASI ===================== -->
+<div class="overlay" id="notif-list-overlay">
+  <div class="sheet">
+    <h2><svg class="icon" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>Notifikasi</h2>
+    <div class="notif-list" id="notif-list"></div>
+  </div>
+</div>
+
+<!-- ===================== PHOTO VIEWER ===================== -->
+<div id="photo-viewer">
+  <svg class="icon pv-close" id="pv-close" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+  <img id="pv-img" src="" />
+</div>
+
+<!-- ===================== VIDEO PLAYER LIGHTBOX ===================== -->
+<div id="video-player-overlay">
+  <div class="vp-topbar">
+    <svg class="icon" id="vp-close" style="cursor:pointer" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+  </div>
+  <video id="vp-video" controls playsinline></video>
+  <div class="vp-caption" id="vp-caption"></div>
 </div>
 
 <!-- ===================== DM INBOX ===================== -->
@@ -424,8 +529,8 @@
 <div class="overlay-full" id="dm-chat-overlay">
   <div class="op-topbar">
     <svg class="icon op-back" id="dm-back-btn" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-    <div class="avatar-sm" id="dm-chat-avatar" style="width:32px;height:32px;border-radius:50%;overflow:hidden;background:var(--card-2);"></div>
-    <span style="font-weight:700; font-size:14px; display:flex; align-items:center; gap:3px;" id="dm-chat-name"></span>
+    <div class="avatar-sm name-clickable" id="dm-chat-avatar" style="width:32px;height:32px;border-radius:50%;overflow:hidden;background:var(--card-2);"></div>
+    <span style="font-weight:700; font-size:14px; display:flex; align-items:center; gap:3px; cursor:pointer;" id="dm-chat-name"></span>
   </div>
   <div class="chat-messages" id="dm-chat-messages" style="flex:1;"></div>
   <div class="chat-image-preview" id="dm-image-preview">
