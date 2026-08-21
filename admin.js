@@ -37,9 +37,25 @@ function $(sel){ return document.querySelector(sel); }
 function $all(sel){ return document.querySelectorAll(sel); }
 function rupiah(n){ return 'Rp' + Number(n||0).toLocaleString('id-ID'); }
 function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function friendlyError(msg) {
+  const raw = String(msg || '');
+  const m = raw.toLowerCase();
+  if (m.includes('row-level security') || m.includes('jwt') || m.includes('permission denied') || m.includes('403')) {
+    return 'Sesi admin berakhir. Muat ulang halaman lalu login lagi.';
+  }
+  if (m.includes('foreign key')) return 'Data belum siap, coba lagi sebentar.';
+  if (m.includes('duplicate key') || m.includes('already exists')) return 'Data ini sudah ada.';
+  if (m.includes('failed to fetch') || m.includes('network')) return 'Koneksi bermasalah. Cek internet dan coba lagi.';
+  if (m.includes('violates') || m.includes('constraint') || m.includes('invalid input syntax') || m.includes('pgrst') || m.includes('42501') || m.includes('23505')) {
+    return 'Terjadi kesalahan. Coba lagi.';
+  }
+  return raw;
+}
+
 function showToast(msg, type='info'){
   const el = $('#admin-toast');
-  el.textContent = msg;
+  el.textContent = type === 'error' ? friendlyError(msg) : msg;
   el.style.color = type === 'error' ? 'var(--red)' : 'var(--text)';
   el.classList.add('show');
   clearTimeout(el._t);

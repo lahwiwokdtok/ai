@@ -28,6 +28,55 @@ const ALLOWED_AMOUNTS = [10, 500, 1000, 2000, 5000, 10000];
 const WITHDRAWAL_FEE = 1000;
 const EMAIL_DOMAIN = '@xaya.local';
 
+// =====================================================================
+// PENERJEMAH ERROR — jangan pernah tampilkan pesan mentah dari database
+// =====================================================================
+function friendlyError(err) {
+  const raw = (err?.message || String(err || '')).toLowerCase();
+
+  if (raw.includes('row-level security') || raw.includes('jwt expired') || raw.includes('invalid jwt') || raw.includes('jwt is expired')) {
+    forceReAuth('Sesi kamu berakhir. Silakan login lagi.');
+    return 'Sesi kamu berakhir. Silakan login lagi.';
+  }
+  if (raw.includes('failed to fetch') || raw.includes('networkerror') || raw.includes('load failed')) {
+    return 'Gagal terhubung ke server. Periksa koneksi internet kamu.';
+  }
+  if (raw.includes('duplicate key value violates unique constraint')) {
+    return 'Data ini sudah ada, tidak bisa diulang.';
+  }
+  if (raw.includes('violates foreign key constraint')) {
+    return 'Data terkait tidak ditemukan. Coba muat ulang halaman.';
+  }
+  if (raw.includes('insufficient_privilege') || raw.includes('permission denied')) {
+    return 'Kamu tidak punya izin untuk melakukan ini.';
+  }
+  if (raw.includes('value too long')) {
+    return 'Teksnya kepanjangan, coba dipersingkat.';
+  }
+  // Pesan dari RPC kita sendiri (mis. "Saldo tidak cukup") sudah ramah — tampilkan apa adanya.
+  if (err?.message && err.message.length < 120 && !raw.includes('null value') && !raw.includes('constraint') && !raw.includes('column')) {
+    return err.message;
+  }
+  return 'Terjadi kesalahan. Coba lagi sebentar.';
+}
+
+let reAuthTriggered = false;
+async function forceReAuth(message) {
+  if (reAuthTriggered) return;
+  reAuthTriggered = true;
+  stopHeartbeat();
+  if (chatChannel) { supabase.removeChannel(chatChannel); chatChannel = null; }
+  if (dmChannel) { supabase.removeChannel(dmChannel); dmChannel = null; }
+  if (dmNotifyChannel) { supabase.removeChannel(dmNotifyChannel); dmNotifyChannel = null; }
+  if (chatNotifyChannel) { supabase.removeChannel(chatNotifyChannel); chatNotifyChannel = null; }
+  if (notifChannel) { supabase.removeChannel(notifChannel); notifChannel = null; }
+  await supabase.auth.signOut().catch(() => {});
+  currentUser = null; currentProfile = null;
+  showScreen('screen-auth');
+  showToast(message, 'error');
+  setTimeout(() => { reAuthTriggered = false; }, 3000);
+}
+
 let currentUser = null;
 let currentProfile = null;
 let claimTimer = null;
@@ -42,9 +91,12 @@ let statusTimer = null;
 function $(sel){ return document.querySelector(sel); }
 function $all(sel){ return document.querySelectorAll(sel); }
 function showScreen(id){ $all('.screen').forEach(s=>s.classList.remove('active')); $('#'+id).classList.add('active'); }
+
+// Ubah pesan error teknis dari database/Supabase jadi bahasa manusia.
+// (fungsi friendlyError asli ada di atas, dekat forceReAuth)
 function showToast(msg, type='info'){
   const el = $('#toast');
-  el.textContent = msg;
+  el.textContent = type === 'error' ? friendlyError(msg) : msg;
   el.style.color = type==='error' ? 'var(--red)' : 'var(--text)';
   el.classList.add('show');
   clearTimeout(el._t);
@@ -166,6 +218,29 @@ async function onAuthed() {
   loadStatuses();
   loadVideoFeed();
 }
+
+// Jaga sesi tetap sinkron: kalau token di-refresh, update currentUser;
+// kalau ternyata sign-out (mis. refresh token sudah kedaluwarsa setelah lama idle), arahkan ke login.
+supabase.auth.onAuthStateChange((event, session) => {
+  if (event === 'TOKEN_REFRESHED' && session?.user) {
+    currentUser = session.user;
+  }
+  if (event === 'SIGNED_OUT' && currentUser) {
+    forceReAuth('Sesi kamu berakhir. Silakan login lagi.');
+  }
+});
+
+// Saat tab dibuka lagi setelah lama di-background, pastikan sesi masih valid
+// sebelum user sempat mencoba aksi yang akan gagal karena token basi.
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState !== 'visible' || !currentUser) return;
+  const { data, error } = await supabase.auth.getSession();
+  if (error || !data.session) {
+    forceReAuth('Sesi kamu berakhir. Silakan login lagi.');
+  } else {
+    currentUser = data.session.user;
+  }
+});
 
 async function loadProfile() {
   const { data, error } = await supabase.from('profiles').select('*').eq('id', currentUser.id).single();
@@ -417,7 +492,7 @@ $('#submit-status-upload').onclick = async () => {
     closeSheet('status-upload-overlay'); resetStatusForm();
     loadStatuses();
   } catch (e) {
-    showToast(e.message, 'error');
+    showToast(friendlyError(e), 'error');
   } finally {
     btn.disabled = false; btn.textContent = 'Publikasikan';
   }
@@ -456,7 +531,7 @@ $('#submit-video-upload').onclick = async () => {
     closeSheet('video-upload-overlay'); resetVideoForm();
     loadVideoFeed();
   } catch (e) {
-    showToast(e.message, 'error');
+    showToast(friendlyError(e), 'error');
   } finally {
     btn.disabled = false; btn.textContent = 'Publikasikan';
   }
@@ -538,14 +613,14 @@ document.addEventListener('click', () => {
 
 async function deleteOwnVideo(videoId) {
   const { error } = await supabase.from('videos').update({ deleted_by_user: true }).eq('id', videoId).eq('user_id', currentUser.id);
-  if (error) { showToast(error.message, 'error'); return; }
+  if (error) { showToast(friendlyError(error), 'error'); return; }
   showToast('Video dihapus');
   loadProfileMedia('videos');
   loadVideoFeed();
 }
 async function deleteOwnStatus(statusId, afterFn) {
   const { error } = await supabase.from('statuses').update({ deleted_by_user: true }).eq('id', statusId).eq('user_id', currentUser.id);
-  if (error) { showToast(error.message, 'error'); return; }
+  if (error) { showToast(friendlyError(error), 'error'); return; }
   showToast('Status dihapus');
   loadStatuses();
   if (afterFn) afterFn();
@@ -597,7 +672,7 @@ $('#save-edit-profile').onclick = async () => {
   const name = $('#edit-display-name').value.trim();
   const bio = $('#edit-bio').value.trim();
   const { error } = await supabase.from('profiles').update({ display_name: name || null, bio: bio || null }).eq('id', currentUser.id);
-  if (error) { showToast(error.message, 'error'); return; }
+  if (error) { showToast(friendlyError(error), 'error'); return; }
   currentProfile.display_name = name;
   currentProfile.bio = bio;
   renderProfileHeader();
@@ -663,7 +738,7 @@ $('#confirm-withdraw').onclick = async () => {
     await loadProfile();
     loadWithdrawHistory();
   } catch (e) {
-    showToast(e.message, 'error');
+    showToast(friendlyError(e), 'error');
     btn.disabled = false;
     btn.textContent = 'Ajukan';
   }
@@ -778,7 +853,7 @@ async function deleteChatMessage(id) {
   } else {
     ({ error } = await supabase.from('chat_messages').update({ deleted_by_admin: true }).eq('id', id).eq('user_id', currentUser.id));
   }
-  if (error) { showToast(error.message, 'error'); return; }
+  if (error) { showToast(friendlyError(error), 'error'); return; }
   chatMessagesCache = chatMessagesCache.filter(m => m.id !== id);
   renderChatMessages();
 }
@@ -837,6 +912,17 @@ function updateChatSendState() {
 
 $('#chat-send-btn').onclick = () => sendChatMessage();
 
+// Kalau insert gagal karena sesi basi (RLS/JWT), coba refresh sesi lalu
+// jalankan ulang sekali secara otomatis sebelum menyerah.
+async function insertWithSessionRetry(insertFn) {
+  let { error } = await insertFn();
+  if (error && /row-level security|jwt/i.test(error.message || '')) {
+    await supabase.auth.refreshSession().catch(() => {});
+    ({ error } = await insertFn());
+  }
+  return { error };
+}
+
 async function sendChatMessage() {
   const textEl = $('#chat-text-input');
   const text = textEl.value.trim();
@@ -855,11 +941,11 @@ async function sendChatMessage() {
       imageUrl = pub.publicUrl;
     }
 
-    const { error } = await supabase.from('chat_messages').insert({
+    const { error } = await insertWithSessionRetry(() => supabase.from('chat_messages').insert({
       user_id: currentUser.id,
       content: text || null,
       image_url: imageUrl,
-    });
+    }));
     if (error) throw error;
 
     textEl.value = ''; textEl.style.height = 'auto';
@@ -868,7 +954,7 @@ async function sendChatMessage() {
     $('#chat-image-preview').classList.remove('show');
     updateChatSendState();
   } catch (e) {
-    showToast(e.message, 'error');
+    showToast(friendlyError(e), 'error');
   } finally {
     btn.disabled = false;
     updateChatSendState();
@@ -887,7 +973,7 @@ async function toggleLike(videoId, btn) {
     const countEl = document.querySelector(`[data-like-count="${videoId}"]`);
     if (countEl) countEl.textContent = data.like_count;
   } catch (e) {
-    showToast(e.message, 'error');
+    showToast(friendlyError(e), 'error');
   } finally {
     btn.disabled = false;
   }
@@ -1007,7 +1093,7 @@ async function toggleCommentLike(commentId, el) {
     const countEl = document.querySelector(`[data-comment-like-count="${commentId}"]`);
     if (countEl) countEl.textContent = data.like_count;
   } catch (e) {
-    showToast(e.message, 'error');
+    showToast(friendlyError(e), 'error');
   } finally {
     el.style.pointerEvents = '';
   }
@@ -1039,12 +1125,12 @@ async function sendComment() {
   const btn = $('#comment-send-btn');
   btn.disabled = true;
   try {
-    const { error } = await supabase.from('video_comments').insert({
+    const { error } = await insertWithSessionRetry(() => supabase.from('video_comments').insert({
       video_id: currentCommentVideoId,
       user_id: currentUser.id,
       parent_comment_id: replyToCommentId,
       content: text,
-    });
+    }));
     if (error) throw error;
     input.value = '';
     replyToCommentId = null;
@@ -1053,7 +1139,7 @@ async function sendComment() {
     const countEl = document.querySelector(`[data-comment-count="${currentCommentVideoId}"]`);
     if (countEl) countEl.textContent = Number(countEl.textContent) + 1;
   } catch (e) {
-    showToast(e.message, 'error');
+    showToast(friendlyError(e), 'error');
   } finally {
     updateCommentSendState();
   }
@@ -1067,7 +1153,7 @@ async function deleteComment(id) {
   } else {
     ({ error } = await supabase.from('video_comments').update({ deleted_by_user: true }).eq('id', id).eq('user_id', currentUser.id));
   }
-  if (error) { showToast(error.message, 'error'); return; }
+  if (error) { showToast(friendlyError(error), 'error'); return; }
   await loadComments();
   const countEl = document.querySelector(`[data-comment-count="${currentCommentVideoId}"]`);
   if (countEl) countEl.textContent = Math.max(0, Number(countEl.textContent) - 1);
@@ -1138,7 +1224,7 @@ async function toggleFollowUI(userId) {
     setFollowBtnState(data.following);
     $('#op-stat-followers').textContent = data.follower_count;
   } catch (e) {
-    showToast(e.message, 'error');
+    showToast(friendlyError(e), 'error');
   } finally {
     btn.disabled = false;
   }
@@ -1236,7 +1322,7 @@ function updateInboxDot(show) {
 async function openDmChat(otherUserId) {
   if (otherUserId === currentUser.id) return;
   const { data: convId, error } = await supabase.rpc('get_or_create_dm', { p_other_user_id: otherUserId });
-  if (error) { showToast(error.message, 'error'); return; }
+  if (error) { showToast(friendlyError(error), 'error'); return; }
   dmConversationId = convId;
 
   const { data: p } = await supabase.from('profiles').select('*').eq('id', otherUserId).single();
@@ -1356,17 +1442,17 @@ async function sendDmMessage() {
       const { data: pub } = supabase.storage.from('media').getPublicUrl(path);
       imageUrl = pub.publicUrl;
     }
-    const { error } = await supabase.from('dm_messages').insert({
+    const { error } = await insertWithSessionRetry(() => supabase.from('dm_messages').insert({
       conversation_id: dmConversationId, sender_id: currentUser.id,
       content: text || null, image_url: imageUrl,
-    });
+    }));
     if (error) throw error;
     textEl.value = ''; textEl.style.height = 'auto';
     dmImageFileObj = null; $('#dm-image-file').value = '';
     $('#dm-image-preview').classList.remove('show');
     await loadDmMessages();
   } catch (e) {
-    showToast(e.message, 'error');
+    showToast(friendlyError(e), 'error');
   } finally {
     btn.disabled = false;
     updateDmSendState();
